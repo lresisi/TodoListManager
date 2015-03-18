@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">TodoListManager</string>
+    <string name="add_string">Add</string>
+    <string name="delete_string">Delete item</string>
+    <string name="empty_item_title">Empty Item</string>
+    <string name="empty_item_message">You entered an empty item. Nothing was done with it.</string>
+    <string name="action_settings">Settings</string>
+</resources>
