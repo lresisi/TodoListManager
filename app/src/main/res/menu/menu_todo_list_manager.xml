@@ -2,6 +2,6 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools" tools:context=".TodoListManagerActivity">
 
-    <item android:id="@+id/add"
+    <item android:id="@+id/menuItemAdd"
         android:title="@string/add_string"/>
 </menu>
