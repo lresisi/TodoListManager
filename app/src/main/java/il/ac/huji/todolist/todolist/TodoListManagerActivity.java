@@ -1,7 +1,10 @@
 package il.ac.huji.todolist.todolist;
 
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
 import android.graphics.Color;
 import android.net.Uri;
 import android.support.v7.app.ActionBarActivity;
@@ -13,54 +16,61 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.ListView;
+import android.widget.SimpleCursorAdapter;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.Locale;
 
 public class TodoListManagerActivity extends ActionBarActivity {
 
     /* ================================================================================= */
 
+    // IDs definitions
     private static final int RETURN_FROM_ADD_MENU = 1;
     private static final int menuItemDelete = Menu.FIRST + 1;
     private static final int menuItemCall = Menu.FIRST + 2;
 
-    private ArrayList<TodoItem> lstTodoItems;
-    private ArrayAdapter<TodoItem> todoItemsAdapter;
+    // Global variables
+    private TodoItemsAdapter todoItemsAdapter;
+    private SQLiteDatabase db;
+    private DBHelper dbHelper;
 
-    /* ================================================================================= */
+/* ================================================================================= */
 
     /**
      * A custom adapter for the todoItems
      */
-    private class TodoItemsAdapter<E> extends ArrayAdapter<E> {
+    private class TodoItemsAdapter extends SimpleCursorAdapter {
+
+        private int titleIndex, dueDateIndex;
 
         // Constructor
-        public TodoItemsAdapter(Context context, int resource, ArrayList<E> objects) {
-            super(context, resource, objects);
+        public TodoItemsAdapter(Context context, int layout, Cursor c, String[] from, int[] to, int flags) {
+            super(context, layout, c, from, to, flags);
+            titleIndex = c.getColumnIndex(DBHelper.TITLE_COL_NAME);
+            dueDateIndex = c.getColumnIndex(DBHelper.DUE_DATE_COL_NAME);
         }
 
         @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            View view = convertView;
-            if (view == null) {
-                LayoutInflater vi = LayoutInflater.from(getContext());
-                view = vi.inflate(R.layout.row, null);
-            }
+        public View newView(Context context, Cursor cursor, ViewGroup parent) {
+            LayoutInflater inflater = LayoutInflater.from(context);
+            return inflater.inflate(R.layout.row, parent, false);
+        }
 
+        @Override
+        public void bindView(View view, Context context, Cursor cursor) {
+            // Find the relevant TextViews
             TextView txtTodoTitle = (TextView) view.findViewById(R.id.txtTodoTitle);
             TextView txtTodoDueDate = (TextView) view.findViewById(R.id.txtTodoDueDate);
 
             // Set the text of the item (both title and dueDate)
-            TodoItem todoItem = lstTodoItems.get(position);
-            SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");
-            Date dueDate = todoItem.getTodoDueDate();
-            txtTodoTitle.setText(todoItem.getTodoTitle());
+            txtTodoTitle.setText(cursor.getString(titleIndex));
+            Date dueDate = new Date(cursor.getLong(dueDateIndex));
+            SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy", Locale.getDefault());
             txtTodoDueDate.setText(sdf.format(dueDate));
 
             // Set the color of the task
@@ -71,8 +81,6 @@ public class TodoListManagerActivity extends ActionBarActivity {
                 txtTodoTitle.setTextColor(Color.BLACK);
                 txtTodoDueDate.setTextColor(Color.BLACK);
             }
-
-            return view;
         }
     }
 
@@ -83,6 +91,14 @@ public class TodoListManagerActivity extends ActionBarActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_todo_list_manager);
         buildListViewAdapter();
+    }
+
+    /* ================================================================================= */
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        db.close();
     }
 
     /* ================================================================================= */
@@ -100,6 +116,7 @@ public class TodoListManagerActivity extends ActionBarActivity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
+            // Display the Add ContextMenu
             case (R.id.menuItemAdd):
                 super.onOptionsItemSelected(item);
                 this.closeOptionsMenu();
@@ -116,13 +133,15 @@ public class TodoListManagerActivity extends ActionBarActivity {
      * Creates an adapter for the todoItems list and binds them together
      */
     private void buildListViewAdapter() {
-        // Initialize a new, empty array
-        lstTodoItems = new ArrayList<TodoItem>();
+        // Create the database
+        dbHelper = new DBHelper(TodoListManagerActivity.this);
+        db = dbHelper.getWritableDatabase();
 
-        // Initialize a new adapter
-        todoItemsAdapter = new TodoItemsAdapter<TodoItem>(getApplicationContext(),
-                R.layout.row,
-                lstTodoItems);
+        // Create the adapter
+        Cursor cursor = dbHelper.getCursor(db);
+        String[] from = new String[] {DBHelper.TITLE_COL_NAME, DBHelper.DUE_DATE_COL_NAME};
+        int[] to = new int[] {R.id.txtTodoTitle, R.id.txtTodoDueDate};
+        todoItemsAdapter = new TodoItemsAdapter(TodoListManagerActivity.this, R.layout.row, cursor, from, to, 0);
 
         // Bind the listView and the adapter
         ListView listView = (ListView) findViewById(R.id.lstTodoItems);
@@ -139,15 +158,15 @@ public class TodoListManagerActivity extends ActionBarActivity {
             case RETURN_FROM_ADD_MENU:
                 // Check if should add a new item
                 if (resCode == RESULT_OK) {
+                    // Extract the data from the Intent
                     Date dueDate = (Date) data.getSerializableExtra("dueDate");
                     String title = data.getStringExtra("title");
-                    lstTodoItems.add(new TodoItem(title, dueDate));
-                    todoItemsAdapter.notifyDataSetChanged();
+
+                    // Add the new item
+                    handleItemAdd(title, dueDate);
                 }
                 break;
         }
-
-        return;
     }
 
     /* ================================================================================= */
@@ -157,7 +176,7 @@ public class TodoListManagerActivity extends ActionBarActivity {
 
         // Set the title of the context menu
         int position = ((AdapterView.AdapterContextMenuInfo) menuInfo).position;
-        String title = lstTodoItems.get(position).getTodoTitle();
+        String title = getTitleAtPosition(position);
         menu.setHeaderTitle(title);
 
         // Add delete option
@@ -173,12 +192,12 @@ public class TodoListManagerActivity extends ActionBarActivity {
 
     @Override
     public boolean onContextItemSelected(MenuItem item) {
-        int position = ((AdapterView.AdapterContextMenuInfo) item.getMenuInfo()).position;
+        AdapterView.AdapterContextMenuInfo info = (AdapterView.AdapterContextMenuInfo) item.getMenuInfo();
         switch (item.getItemId()) {
             case menuItemDelete:
-                return handleItemDelete(position);
+                return handleItemDelete(info.id);
             case menuItemCall:
-                return handleItemCall(position);
+                return handleItemCall(info.position);
             default:
                 return super.onOptionsItemSelected(item);
         }
@@ -188,11 +207,11 @@ public class TodoListManagerActivity extends ActionBarActivity {
 
     /**
      * Handles deletion of a todoItem
-     * @param position the index of the todoItem in lstTodoItems
+     * @param id the id of the todoItem in lstTodoItems
      */
-    private boolean handleItemDelete(int position) {
-        lstTodoItems.remove(position);
-        todoItemsAdapter.notifyDataSetChanged();
+    private boolean handleItemDelete(long id) {
+        db.delete(DBHelper.TABLE_NAME, DBHelper.KEY_COL_NAME + " = " + Long.toString(id), null);
+        todoItemsAdapter.changeCursor(dbHelper.getCursor(db));
         Toast.makeText(this, R.string.successful_delete, Toast.LENGTH_LONG).show();
         return true;
     }
@@ -201,10 +220,10 @@ public class TodoListManagerActivity extends ActionBarActivity {
 
     /**
      * Handles click on a "Dial" option
-     * @param position the index of the todoItem in lstTodoItems
+     * @param position the id of the todoItem in lstTodoItems
      */
     private boolean handleItemCall(int position) {
-        String title = lstTodoItems.get(position).getTodoTitle();
+        String title = getTitleAtPosition(position);
         String phoneNumber = title.replace(getResources().getString(R.string.call_string), "");
         Intent dial = new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phoneNumber));
         startActivity(dial);
@@ -218,7 +237,7 @@ public class TodoListManagerActivity extends ActionBarActivity {
      * @param date A date (including time)
      * @return The same date without the time part
      */
-    private Date removeTime(Date date) {
+    private static Date removeTime(Date date) {
         Calendar cal = Calendar.getInstance();
         cal.setTime(date);
         cal.set(Calendar.HOUR_OF_DAY, 0);
@@ -226,5 +245,33 @@ public class TodoListManagerActivity extends ActionBarActivity {
         cal.set(Calendar.SECOND, 0);
         cal.set(Calendar.MILLISECOND, 0);
         return cal.getTime();
+    }
+
+    /* ================================================================================= */
+
+    /**
+     * Add a new item to the database
+     * @param title the title of the new item
+     * @param dueDate the due date of the new item
+     */
+    private void handleItemAdd(String title, Date dueDate) {
+        ContentValues todoItem = new ContentValues();
+        todoItem.put(DBHelper.TITLE_COL_NAME, title);
+        todoItem.put(DBHelper.DUE_DATE_COL_NAME, dueDate.getTime());
+        db.insert(DBHelper.TABLE_NAME, null, todoItem);
+        todoItemsAdapter.changeCursor(dbHelper.getCursor(db));
+    }
+
+    /* ================================================================================= */
+
+    /**
+     * Returns the title of the todoItem in the given position
+     * @param position the position of the todoItem
+     * @return the title of the todoItem in the given position
+     */
+    private String getTitleAtPosition (int position) {
+        Cursor cursor = todoItemsAdapter.getCursor();
+        cursor.moveToPosition(position);
+        return cursor.getString(todoItemsAdapter.titleIndex);
     }
 }

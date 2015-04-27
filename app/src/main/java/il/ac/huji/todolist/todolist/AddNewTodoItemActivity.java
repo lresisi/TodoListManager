@@ -75,5 +75,4 @@ public class AddNewTodoItemActivity extends Activity {
 
         return calendar.getTime();
     }
-
 }
